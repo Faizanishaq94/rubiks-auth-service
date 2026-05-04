@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
-import { requireAuth } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validate.middleware';
 import {
   RegisterSchema,
@@ -12,15 +11,12 @@ import {
 
 const router = Router();
 
-// Public routes
 router.post('/register', validate(RegisterSchema), AuthController.register);
 router.post('/confirm', validate(ConfirmSignUpSchema), AuthController.confirmSignUp);
 router.post('/login', validate(LoginSchema), AuthController.login);
 router.post('/forgot-password', validate(ForgotPasswordSchema), AuthController.forgotPassword);
 router.post('/reset-password', validate(ResetPasswordSchema), AuthController.resetPassword);
-
-// Protected routes
-router.post('/logout', requireAuth, AuthController.logout);
-router.get('/me', requireAuth, AuthController.getMe);
+router.post('/logout', AuthController.logout);
+router.get('/me', AuthController.getMe);
 
 export default router;

@@ -7,7 +7,7 @@ import { env } from './config/env';
 
 const app = express();
 
-// TODO: add any global middleware here (e.g. cors(), helmet(), express.json())
+
 app.use(express.json());
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGINS }));
