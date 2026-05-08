@@ -2,6 +2,7 @@ import { authClient } from '../config/cognito';
 import { env } from '../config/env';
 import dbClient from '../db/prisma'
 import { UserStatus } from '../generated/prisma/enums'
+import { AppError } from '../utils/AppError';
 
 // TODO: Cognito requires an HMAC secret hash for each request when a client secret is set.
 //       Implement a helper that computes it: HMAC-SHA256(username + clientId, clientSecret) → base64
@@ -41,18 +42,31 @@ export const AuthService = {
   },
 
   async logout(accessToken: string) {
-    // TODO: build and send a GlobalSignOutCommand to invalidate all tokens for the user
+    const response = await authClient.globalSignOut(accessToken);
   },
 
   async forgotPassword(email: string) {
-    // TODO: build and send a ForgotPasswordCommand — Cognito emails a reset code
+    const response = await authClient.forgotPassword(email);
   },
 
   async resetPassword(email: string, code: string, newPassword: string) {
-    // TODO: build and send a ConfirmForgotPasswordCommand
+    const response = await authClient.confirmForgotPassword(email, code, newPassword);
   },
 
-  async getUser(accessToken: string) {
-    // TODO: build and send a GetUserCommand to fetch the user's attributes from the token
+  async getUser(email: string) {
+    const user = await dbClient.user.findFirst({
+      where: {
+        email
+      }
+    });
+
+    if (!user) {
+      throw new AppError(400, 'User does not exist');
+    }
+
+    return {
+      ...user
+    };
   },
+  
 };
