@@ -27,9 +27,15 @@ export const ResetPasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
+export const RefreshTokenSchema = z.object({
+  refreshToken: z.string(),
+  email: z.email(),
+});
+
 // Inferred TypeScript types — use these in your controllers instead of defining types manually
 export type RegisterBody = z.infer<typeof RegisterSchema>;
 export type ConfirmSignUpBody = z.infer<typeof ConfirmSignUpSchema>;
 export type LoginBody = z.infer<typeof LoginSchema>;
 export type ForgotPasswordBody = z.infer<typeof ForgotPasswordSchema>;
 export type ResetPasswordBody = z.infer<typeof ResetPasswordSchema>;
+export type RefreshTokenBody = z.infer<typeof RefreshTokenSchema>;

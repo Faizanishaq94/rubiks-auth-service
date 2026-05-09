@@ -7,6 +7,23 @@ import {
   ForgotPasswordCommand,
   ConfirmForgotPasswordCommand,
   GetUserCommand,
+  AdminDeleteUserCommand,
+  UsernameExistsException,
+  InvalidPasswordException,
+  InvalidParameterException,
+  CodeDeliveryFailureException,
+  CodeMismatchException,
+  ExpiredCodeException,
+  AliasExistsException,
+  UserNotFoundException,
+  UserNotConfirmedException,
+  PasswordResetRequiredException,
+  NotAuthorizedException,
+  TooManyFailedAttemptsException,
+  TooManyRequestsException,
+  LimitExceededException,
+  ResourceNotFoundException,
+  InternalErrorException
 } from '@aws-sdk/client-cognito-identity-provider';
 import crypto from 'crypto';
 import { env } from './env';
@@ -17,6 +34,7 @@ const cognitoClient = new CognitoIdentityProviderClient({
 });
 
 function computeSecretHash(username: string): string {
+  console.log(`computeSecretHash - username: "${username}", clientId: "${env.COGNITO_CLIENT_ID}", secretLength: ${env.COGNITO_CLIENT_SECRET.length}`);
   return crypto
     .createHmac('sha256', env.COGNITO_CLIENT_SECRET)
     .update(username + env.COGNITO_CLIENT_ID)
@@ -24,30 +42,30 @@ function computeSecretHash(username: string): string {
 }
 
 function handleCognitoError(err: unknown): AppError {
-  if (err instanceof Error) {
-    switch (err.name) {
-      case 'UsernameExistsException':
-        return new AppError(409, 'An account with this email already exists');
-      case 'UserNotFoundException':
-        return new AppError(404, 'No account found with this email');
-      case 'NotAuthorizedException':
-        return new AppError(401, 'Incorrect email or password');
-      case 'UserNotConfirmedException':
-        return new AppError(403, 'Please verify your email before signing in');
-      case 'CodeMismatchException':
-        return new AppError(400, 'Invalid verification code');
-      case 'ExpiredCodeException':
-        return new AppError(400, 'Verification code has expired');
-      case 'InvalidPasswordException':
-        return new AppError(400, 'Password does not meet requirements');
-      case 'LimitExceededException':
-      case 'TooManyRequestsException':
-        return new AppError(429, 'Too many attempts. Please try again later');
-      case 'InvalidParameterException':
-        return new AppError(400, 'Invalid request parameters');
-    }
+  console.log(`'Cognito error - ${JSON.stringify(err)}`);
+  if (
+    err instanceof UsernameExistsException ||
+    err instanceof InvalidPasswordException ||
+    err instanceof InvalidParameterException ||
+    err instanceof CodeDeliveryFailureException ||
+    err instanceof CodeMismatchException ||
+    err instanceof ExpiredCodeException ||
+    err instanceof AliasExistsException ||
+    err instanceof UserNotFoundException ||
+    err instanceof UserNotConfirmedException ||
+    err instanceof PasswordResetRequiredException ||
+    err instanceof NotAuthorizedException ||
+    err instanceof TooManyFailedAttemptsException ||
+    err instanceof TooManyRequestsException ||
+    err instanceof LimitExceededException ||
+    err instanceof ResourceNotFoundException ||
+    err instanceof InternalErrorException
+  ) {
+    return new AppError(err.$metadata.httpStatusCode || 500, err.message);
   }
-  return new AppError(500, 'An unexpected error occurred');
+  else {
+    return new AppError(500, "Auth error");
+  }
 }
 
 async function signUp(email: string, password: string) {
@@ -67,7 +85,8 @@ async function signUp(email: string, password: string) {
     }
 
     return { cognitoId: response.UserSub };
-  } catch (err) {
+  }
+  catch (err) {
     if (err instanceof AppError) throw err;
     throw handleCognitoError(err);
   }
@@ -81,7 +100,8 @@ async function confirmSignUp(email: string, confirmationCode: string) {
       Username: email,
       ConfirmationCode: confirmationCode,
     }));
-  } catch (err) {
+  }
+  catch (err) {
     throw handleCognitoError(err);
   }
 }
@@ -103,12 +123,14 @@ async function initiateAuth(email: string, password: string) {
       throw new AppError(500, 'Authentication succeeded but tokens were not returned');
     }
 
-    return {
+    const tokens = {
       accessToken: result.AccessToken,
       idToken: result.IdToken,
       refreshToken: result.RefreshToken,
     };
-  } catch (err) {
+    return tokens;
+  }
+  catch (err) {
     if (err instanceof AppError) throw err;
     throw handleCognitoError(err);
   }
@@ -119,7 +141,8 @@ async function globalSignOut(accessToken: string) {
     await cognitoClient.send(new GlobalSignOutCommand({
       AccessToken: accessToken,
     }));
-  } catch (err) {
+  }
+  catch (err) {
     throw handleCognitoError(err);
   }
 }
@@ -131,7 +154,8 @@ async function forgotPassword(email: string) {
       SecretHash: computeSecretHash(email),
       Username: email,
     }));
-  } catch (err) {
+  }
+  catch (err) {
     throw handleCognitoError(err);
   }
 }
@@ -145,7 +169,49 @@ async function confirmForgotPassword(email: string, code: string, newPassword: s
       ConfirmationCode: code,
       Password: newPassword,
     }));
-  } catch (err) {
+  }
+  catch (err) {
+    throw handleCognitoError(err);
+  }
+}
+
+async function refreshAuth(refreshToken: string, cognitoId: string) {
+  try {
+    const response = await cognitoClient.send(new InitiateAuthCommand({
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: env.COGNITO_CLIENT_ID,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken,
+        USERNAME: cognitoId,
+        SECRET_HASH: computeSecretHash(cognitoId),
+      },
+    }));
+
+    const result = response.AuthenticationResult;
+    if (!result?.AccessToken || !result?.IdToken) {
+      throw new AppError(500, 'Token refresh failed');
+    }
+
+    const tokens = {
+      accessToken: result.AccessToken,
+      idToken: result.IdToken,
+    };
+    return tokens;
+  }
+  catch (err) {
+    if (err instanceof AppError) throw err;
+    throw handleCognitoError(err);
+  }
+}
+
+async function adminDeleteUser(email: string) {
+  try {
+    await cognitoClient.send(new AdminDeleteUserCommand({
+      UserPoolId: env.COGNITO_USER_POOL_ID,
+      Username: email,
+    }));
+  }
+  catch (err) {
     throw handleCognitoError(err);
   }
 }
@@ -158,11 +224,13 @@ async function getUser(accessToken: string) {
 
     const email = response.UserAttributes?.find(a => a.Name === 'email')?.Value;
 
-    return {
+    const user = {
       cognitoId: response.Username,
       email,
     };
-  } catch (err) {
+    return user;
+  }
+  catch (err) {
     throw handleCognitoError(err);
   }
 }
@@ -171,8 +239,10 @@ export const authClient = {
   signUp,
   confirmSignUp,
   initiateAuth,
+  refreshAuth,
   globalSignOut,
   forgotPassword,
   confirmForgotPassword,
+  adminDeleteUser,
   getUser,
 };
