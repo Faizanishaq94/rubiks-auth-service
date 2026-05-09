@@ -7,6 +7,7 @@ import {
   ForgotPasswordCommand,
   ConfirmForgotPasswordCommand,
   GetUserCommand,
+  AdminDeleteUserCommand,
   UsernameExistsException,
   InvalidPasswordException,
   InvalidParameterException,
@@ -22,7 +23,7 @@ import {
   TooManyRequestsException,
   LimitExceededException,
   ResourceNotFoundException,
-  InternalErrorException,
+  InternalErrorException
 } from '@aws-sdk/client-cognito-identity-provider';
 import crypto from 'crypto';
 import { env } from './env';
@@ -33,6 +34,7 @@ const cognitoClient = new CognitoIdentityProviderClient({
 });
 
 function computeSecretHash(username: string): string {
+  console.log(`computeSecretHash - username: "${username}", clientId: "${env.COGNITO_CLIENT_ID}", secretLength: ${env.COGNITO_CLIENT_SECRET.length}`);
   return crypto
     .createHmac('sha256', env.COGNITO_CLIENT_SECRET)
     .update(username + env.COGNITO_CLIENT_ID)
@@ -40,7 +42,7 @@ function computeSecretHash(username: string): string {
 }
 
 function handleCognitoError(err: unknown): AppError {
-  console.log(JSON.stringify(err));
+  console.log(`'Cognito error - ${JSON.stringify(err)}`);
   if (
     err instanceof UsernameExistsException ||
     err instanceof InvalidPasswordException ||
@@ -66,7 +68,7 @@ function handleCognitoError(err: unknown): AppError {
   }
 }
 
-async function signUp(email: string, password: string, firstName: string, lastName: string) {
+async function signUp(email: string, password: string) {
   try {
     const response = await cognitoClient.send(new SignUpCommand({
       ClientId: env.COGNITO_CLIENT_ID,
@@ -173,6 +175,47 @@ async function confirmForgotPassword(email: string, code: string, newPassword: s
   }
 }
 
+async function refreshAuth(refreshToken: string, cognitoId: string) {
+  try {
+    const response = await cognitoClient.send(new InitiateAuthCommand({
+      AuthFlow: 'REFRESH_TOKEN_AUTH',
+      ClientId: env.COGNITO_CLIENT_ID,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken,
+        USERNAME: cognitoId,
+        SECRET_HASH: computeSecretHash(cognitoId),
+      },
+    }));
+
+    const result = response.AuthenticationResult;
+    if (!result?.AccessToken || !result?.IdToken) {
+      throw new AppError(500, 'Token refresh failed');
+    }
+
+    const tokens = {
+      accessToken: result.AccessToken,
+      idToken: result.IdToken,
+    };
+    return tokens;
+  }
+  catch (err) {
+    if (err instanceof AppError) throw err;
+    throw handleCognitoError(err);
+  }
+}
+
+async function adminDeleteUser(email: string) {
+  try {
+    await cognitoClient.send(new AdminDeleteUserCommand({
+      UserPoolId: env.COGNITO_USER_POOL_ID,
+      Username: email,
+    }));
+  }
+  catch (err) {
+    throw handleCognitoError(err);
+  }
+}
+
 async function getUser(accessToken: string) {
   try {
     const response = await cognitoClient.send(new GetUserCommand({
@@ -196,8 +239,10 @@ export const authClient = {
   signUp,
   confirmSignUp,
   initiateAuth,
+  refreshAuth,
   globalSignOut,
   forgotPassword,
   confirmForgotPassword,
+  adminDeleteUser,
   getUser,
 };
